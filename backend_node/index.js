@@ -76,6 +76,63 @@ app.post('/predict', (req, res) => {
     }
 });
 
+app.post('/chat', async (req, res) => {
+    try {
+        if (!process.env.OPENROUTER_API_KEY) {
+            // Fallback for demo if no key is provided, but prompt user to set it
+            return res.json({ reply: "Maaf, fitur AI belum diaktifkan oleh admin (OPENROUTER_API_KEY belum diatur)." });
+        }
+
+        const { message, history } = req.body;
+
+        // Convert frontend history to OpenRouter (OpenAI-compatible) format
+        const formattedHistory = history ? history.filter((msg) => msg.role !== 'bot' || msg.content !== 'Halo! Saya asisten AI kesehatan Anda. Ada yang ingin Anda tanyakan tentang risiko diabetes atau pola hidup sehat?').map(msg => ({
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content,
+        })) : [];
+
+        const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                "HTTP-Referer": "http://localhost:3000",
+                "X-Title": "DiaPredict",
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "openai/gpt-oss-120b:free", // Updated per user request
+                messages: [
+                    {
+                        role: "system",
+                        content: "Anda adalah asisten medis virtual yang berfokus pada diabetes, pencegahannya, pola makan, dan gaya hidup sehat. Jawab pertanyaan pengguna dengan ramah, ringkas, berempati, dan menggunakan bahasa Indonesia. Ingatkan selalu bahwa Anda bukan pengganti dokter profesional. DILARANG KERAS menggunakan format markdown seperti tanda bintang (*) untuk membuat teks tebal atau daftar bullet. Jawab dengan teks biasa (plain text)."
+                    },
+                    ...formattedHistory,
+                    {
+                        role: "user",
+                        content: message
+                    }
+                ]
+            })
+        });
+
+        if (!openRouterResponse.ok) {
+            const errData = await openRouterResponse.text();
+            throw new Error(`OpenRouter API Error: ${openRouterResponse.status} ${errData}`);
+        }
+
+        const data = await openRouterResponse.json();
+        let responseText = data.choices[0]?.message?.content || "Maaf, saya tidak bisa memberikan jawaban saat ini.";
+        
+        // Remove any asterisks just in case the AI still generates them
+        responseText = responseText.replace(/\*/g, '');
+
+        res.json({ reply: responseText });
+    } catch (error) {
+        console.error("AI Chat Error:", error);
+        res.status(500).json({ error: "Gagal memproses pesan AI", reply: "Maaf, terjadi kesalahan saat menghubungi server AI." });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send('Diabetes Risk Prediction Node.js API is running');
 });
